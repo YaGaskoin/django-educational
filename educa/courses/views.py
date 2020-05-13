@@ -10,8 +10,36 @@ from django.forms.models import modelform_factory
 from django.apps import apps
 from .models import Module, Content
 from braces.views import CsrfExemptMixin, JSONRequestResponseMixin
+from django.db.models import Count
+from .models import Subject
+from django.views.generic.detail import DetailView
+from students.forms import CourseEnrollForm
 
 # Create your views here.
+
+
+class CoursesDetailView(DetailView):
+    model = Course
+    template_name = 'courses/detail.html'
+
+    def get_context_data(self, **kwargs):
+        context = super(CoursesDetailView, self).get_context_data(**kwargs)
+        context['enroll_form'] = CourseEnrollForm(
+            initial={'course': self.object})
+        return context
+
+
+class CourseListView(TemplateResponseMixin, View):
+    template_name = 'courses/list.html'
+    model = Course
+
+    def get(self, request, subject=None):
+        subjects = Subject.objects.annotate(total_courses=Count('courses'))
+        courses = Course.objects.annotate(total_modules=Count('modules'))
+        if subject:
+            subject = get_object_or_404(Subject, slug=subject)
+            courses = courses.filter(subject=subject)
+        return self.render_to_response({'subjects': subjects, 'subject': subject, 'courses': courses})
 
 
 class ModuleOrderView(CsrfExemptMixin, JSONRequestResponseMixin, View):
@@ -76,8 +104,7 @@ class ContentCreateUpdateView(TemplateResponseMixin, View):
             self.obj = get_object_or_404(self.model,
                                          id=id,
                                          owner=request.user)
-        return super(ContentCreateUpdateView,
-                     self).dispatch(request, module_id, model_name, id)
+        return super(ContentCreateUpdateView, self).dispatch(request, module_id, model_name, id)
 
     def get(self, request, module_id, model_name, id=None):
         form = self.get_form(self.model, instance=self.obj)
@@ -92,6 +119,8 @@ class ContentCreateUpdateView(TemplateResponseMixin, View):
             obj.owner = request.user
             obj.save()
             if not id:
+                print(obj)
+                print(self.module)
                 Content.objects.create(module=self.module, item=obj)
             return redirect('module_content_list', self.module.id)
         return self.render_to_response( {'form': form, 'object': self.obj})
@@ -111,14 +140,14 @@ class CourseModuleUpdateView(TemplateResponseMixin, View):
 
     def get(self, request, *args, **kwargs):
         formset = self.get_formset()
-        return self.render_to_response({'course': self.course, 'formset': formset})
+        return self.render_to_response({'courses': self.course, 'formset': formset})
 
     def post(self, request, *args, **kwargs):
         formset = self.get_formset(data=request.POST)
         if formset.is_valid():
             formset.save()
             return redirect('manage_course_list')
-        return self.render_to_response( {'course': self.course, 'formset': formset})
+        return self.render_to_response({'courses': self.course, 'formset': formset})
 
 
 class OwnerMixin(object):
